@@ -1,0 +1,3 @@
+deepfake_weights/
+*.pt
+*.pth

@@ -19,10 +19,12 @@ import torch
 import torch.nn as nn
 from architectures import ECAPA_TDNN, IResNet, IBasicBlock
 from architectures_rfop import RFOP, FACE_FEAT_DIM, VOICE_FEAT_DIM, N_CLASS, EMBED_DIM
+from architecture_dino_hubert import FaceDINOEncoder, VoiceHuBERTEncoder
 
 _AUDIO_KEYS  = ["audio_model", "audio", "model_a", "model_a_state_dict"]
 _VISUAL_KEYS = ["visual_model", "visual", "model_v", "model_v_state_dict"]
-
+_DINO_AUDIO_KEYS = ["audio_model"]
+_DINO_FACE_KEYS  = ["face_model"]
 
 def _find(d, candidates):
     for k in candidates:
@@ -54,6 +56,11 @@ def _is_rfop_checkpoint(ckpt: dict) -> bool:
     rfop_keys = ["voice_branch", "face_branch", "fusion_layer", "res_mix", "logits_layer"]
     return any(any(k.startswith(rk) for k in sd) for rk in rfop_keys)
 
+def _is_dino_hubert_checkpoint(ckpt: dict) -> bool:
+    """Detect DINO+HuBERT checkpoint by presence of face_model and audio_model keys."""
+    if not isinstance(ckpt, dict):
+        return False
+    return "face_model" in ckpt and "audio_model" in ckpt
 
 def load_models(checkpoint_path: str, device: torch.device):
     """
@@ -80,6 +87,17 @@ def load_models(checkpoint_path: str, device: torch.device):
         model.eval()
         return model, None, "rfop"
 
+    if _is_dino_hubert_checkpoint(ckpt):
+        model_v = FaceDINOEncoder(embed_dim=512, pretrained=False).to(device)
+        model_a = VoiceHuBERTEncoder(embed_dim=512).to(device)
+
+        model_v.load_state_dict(ckpt["face_model"])
+        model_a.load_state_dict(ckpt["audio_model"])
+
+        model_v.eval()
+        model_a.eval()
+        return model_a, model_v, "dino_hubert"
+    
     # ── ECAPA-TDNN + IResNet checkpoint ───────────────────────────────────────
     if isinstance(ckpt, dict):
         model_a = ECAPA_TDNN(C=1024, embedding_size=512).to(device)
@@ -102,13 +120,14 @@ def load_models(checkpoint_path: str, device: torch.device):
             model_v.eval()
             return model_a, model_v, "ecapa_iresnet"
 
-        raise KeyError(
-            f"Keys found: {list(ckpt.keys())}\n"
-            "Could not identify model type. "
-            "Expected 'audio_model'/'visual_model' (Model 1) or "
-            "'state_dict' with RFOP layers (Model 2)."
-        )
-
+        # raise KeyError(
+        #     f"Keys found: {list(ckpt.keys())}\n"
+        #     "Could not identify model type. "
+        #     "Expected 'audio_model'/'visual_model' (Model 1) or "
+        #     "'state_dict' with RFOP layers (Model 2)."
+        # )
+    
+    
     elif isinstance(ckpt, (list, tuple)) and len(ckpt) == 2:
         model_a = ECAPA_TDNN(C=1024, embedding_size=512).to(device)
         model_v = IResNet(block=IBasicBlock, model='res18', num_features=512).to(device)

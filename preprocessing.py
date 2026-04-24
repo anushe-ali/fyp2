@@ -33,15 +33,16 @@ _face_transform = transforms.Compose([
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def preprocess_face_from_bytes(img_bytes: bytes) -> torch.Tensor:
+def preprocess_face_from_bytes(img_bytes: bytes, face_size: int = FACE_SIZE) -> torch.Tensor:
     """
     Parameters
     ----------
     img_bytes : raw bytes from an uploaded image file
+    face_size : target face size in pixels (H = W = face_size)
 
     Returns
     -------
-    torch.Tensor  [3, 112, 112]  float32  in [0, 1]
+    torch.Tensor  [3, face_size, face_size]  float32  in [0, 1]
     """
     # Decode via OpenCV (handles JPG, PNG, etc.)
     arr = np.frombuffer(img_bytes, np.uint8)
@@ -52,7 +53,12 @@ def preprocess_face_from_bytes(img_bytes: bytes) -> torch.Tensor:
     # BGR → RGB then PIL (to use torchvision transform)
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     pil = Image.fromarray(rgb)
-    return _face_transform(pil)          # [3, 112, 112]
+
+    transform = transforms.Compose([
+        transforms.Resize((face_size, face_size)),
+        transforms.ToTensor(),
+    ])
+    return transform(pil)
 
 
 def preprocess_audio_from_bytes(audio_bytes: bytes, suffix: str = ".wav") -> torch.Tensor:

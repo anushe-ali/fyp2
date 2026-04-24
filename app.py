@@ -8,6 +8,7 @@ import io
 import base64
 import tempfile
 import subprocess
+import shutil
 import uuid
 from PIL import Image
 from model_loader import load_models
@@ -58,12 +59,25 @@ div[data-testid="stExpander"] { background: transparent !important; border: 1px 
 # Helpers
 # ─────────────────────────────────────────────
 
-def extract_best_frame_and_audio(video_bytes: bytes, suffix: str = ".webm") -> tuple[bytes, bytes]:
+def ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
+
+def ensure_ffmpeg_available():
+    if not ffmpeg_available():
+        raise RuntimeError(
+            "FFmpeg and ffprobe are required for video extraction. "
+            "Install FFmpeg and add it to your PATH: https://ffmpeg.org/download.html"
+        )
+
+
+def extract_best_frame_and_audio(video_bytes: bytes, suffix: str = ".webm") -> tuple[bytes, bytes, list[bytes]]:
     """
     Extract audio (mono 16kHz WAV) and the BEST face frame from a video.
     'Best' = lowest deepfake confidence across 5 evenly-spaced candidate frames.
     Falls back to midpoint frame if face detection fails on all candidates.
     """
+    ensure_ffmpeg_available()
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, f"input{suffix}")
         audio_path = os.path.join(tmpdir, "audio.wav")
@@ -136,8 +150,9 @@ def run_biometric_match(face_bytes, audio_bytes, audio_suffix,
                         model_path, device, threshold, language, input_mode):
     with st.spinner("EXECUTING NEURAL EMBEDDING MATCH..."):
         try:
-            model_a, model_v, _ = load_models(model_path, device)
-            face_tensor   = preprocess_face_from_bytes(face_bytes).unsqueeze(0).to(device)
+            model_a, model_v, model_type = load_models(model_path, device)
+            face_size = 224 if model_type == "dino_hubert" else 112
+            face_tensor   = preprocess_face_from_bytes(face_bytes, face_size=face_size).unsqueeze(0).to(device)
             speech_tensor = preprocess_audio_from_bytes(audio_bytes, suffix=audio_suffix).unsqueeze(0).to(device)
 
             with torch.no_grad():
@@ -325,8 +340,8 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### SYSTEM PARAMETERS")
-    english_model_path = st.text_input("English Weights", value="model_english")
-    urdu_model_path    = st.text_input("Urdu Weights",    value="model_urdu")
+    english_model_path = st.text_input("English Weights", value="eng_epoch_30.pt")
+    urdu_model_path    = st.text_input("Urdu Weights",    value="urd_epoch_30.pt")
     st.markdown("---")
     st.markdown("### DETECTION SENSITIVITY")
     face_df_threshold  = st.slider("Visual Threshold",  0.1, 0.9, 0.5, 0.05)
@@ -366,6 +381,13 @@ input_mode = st.radio(
     horizontal=True,
     label_visibility="collapsed",
 )
+
+if input_mode in ("Upload Video", "Record Video") and not ffmpeg_available():
+    st.warning(
+        "Video input requires FFmpeg and ffprobe. "
+        "Install FFmpeg and add it to PATH, then restart the app. "
+        "Without FFmpeg, upload or record video will not work."
+    )
 
 face_bytes       = None
 audio_bytes      = None
@@ -408,6 +430,8 @@ if input_mode == "Upload Video":
                     st.markdown('<span class="ready-badge">AUDIO READY · WAV · MONO · 16kHz</span>', unsafe_allow_html=True)
             except subprocess.CalledProcessError as e:
                 st.error(f"FFMPEG ERROR: {e.stderr.decode() if e.stderr else str(e)}")
+            except (FileNotFoundError, RuntimeError) as e:
+                st.error(f"FFMPEG NOT FOUND: {e}")
             except Exception as e:
                 st.error(f"EXTRACTION FAULT: {e}")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -462,6 +486,8 @@ elif input_mode == "Record Video":
                     st.markdown('<span class="ready-badge">AUDIO READY · WAV · MONO · 16kHz</span>', unsafe_allow_html=True)
             except subprocess.CalledProcessError as e:
                 st.error(f"FFMPEG ERROR: {e.stderr.decode() if e.stderr else str(e)}")
+            except (FileNotFoundError, RuntimeError) as e:
+                st.error(f"FFMPEG NOT FOUND: {e}")
             except Exception as e:
                 st.error(f"EXTRACTION FAULT: {e}")
 

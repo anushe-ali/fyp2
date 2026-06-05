@@ -1,0 +1,6 @@
+deepfake_weights/
+*.pt
+*.pth
+.venv/
+__pycache__/
+*.pyc

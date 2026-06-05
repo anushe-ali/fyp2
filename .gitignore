@@ -4,3 +4,4 @@ deepfake_weights/
 .venv/
 __pycache__/
 *.pyc
+.vscode/
